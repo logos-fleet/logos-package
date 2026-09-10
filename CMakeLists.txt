@@ -128,10 +128,9 @@ option(LGX_BUILD_SHARED "Build shared library" OFF)
 option(LGX_STATIC_CABI "Build the lgx C ABI (lgx.h) as a static archive named liblgx.a" OFF)
 set(LGX_CABI_LIBRARY_TYPE SHARED)
 if(LGX_STATIC_CABI)
-    set(LGX_BUILD_SHARED ON)
     set(LGX_CABI_LIBRARY_TYPE STATIC)
 endif()
-if(LGX_BUILD_SHARED)
+if(LGX_BUILD_SHARED OR LGX_STATIC_CABI)
     add_library(lgx_shared ${LGX_CABI_LIBRARY_TYPE}
         src/lib.cpp
         src/core/path_normalizer.cpp

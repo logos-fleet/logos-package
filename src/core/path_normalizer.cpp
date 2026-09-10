@@ -26,12 +26,13 @@ std::optional<std::string> cfTransform(const std::string& in, void (*op)(CFMutab
     CFRelease(s);
     if (!m) return std::nullopt;
     op(m);
+    const CFRange all = CFRangeMake(0, CFStringGetLength(m));
+    const CFIndex capacity = CFStringGetMaximumSizeForEncoding(all.length, kCFStringEncodingUTF8);
+    std::string out(static_cast<size_t>(capacity), '\0');
     CFIndex used = 0;
-    CFRange all = CFRangeMake(0, CFStringGetLength(m));
-    CFStringGetBytes(m, all, kCFStringEncodingUTF8, 0, false, nullptr, 0, &used);
-    std::string out(static_cast<size_t>(used), '\0');
     CFStringGetBytes(m, all, kCFStringEncodingUTF8, 0, false,
-        reinterpret_cast<UInt8*>(&out[0]), used, &used);
+        reinterpret_cast<UInt8*>(&out[0]), capacity, &used);
+    out.resize(static_cast<size_t>(used));
     CFRelease(m);
     return out;
 }
@@ -89,6 +90,16 @@ bool PathNormalizer::isNFC(const std::string& str) {
     
     icu::UnicodeString ustr = icu::UnicodeString::fromUTF8(str);
     return normalizer->isNormalized(ustr, status) && U_SUCCESS(status);
+}
+
+std::string PathNormalizer::toLowercase(const std::string& str) {
+    UErrorCode status = U_ZERO_ERROR;
+    icu::UnicodeString ustr = icu::UnicodeString::fromUTF8(str);
+    ustr.toLower();
+    
+    std::string result;
+    ustr.toUTF8String(result);
+    return result;
 }
 #endif // LGX_UNICODE_COREFOUNDATION
 
@@ -148,18 +159,6 @@ std::string PathNormalizer::normalizeSeparators(const std::string& path) {
     
     return result;
 }
-
-#if !defined(LGX_UNICODE_COREFOUNDATION)
-std::string PathNormalizer::toLowercase(const std::string& str) {
-    UErrorCode status = U_ZERO_ERROR;
-    icu::UnicodeString ustr = icu::UnicodeString::fromUTF8(str);
-    ustr.toLower();
-    
-    std::string result;
-    ustr.toUTF8String(result);
-    return result;
-}
-#endif // !LGX_UNICODE_COREFOUNDATION
 
 std::string PathNormalizer::joinPath(const std::vector<std::string>& components) {
     if (components.empty()) {

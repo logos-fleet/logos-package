@@ -40,6 +40,32 @@ lgx add mymodule.lgx --variant darwin-arm64 --files ./dist --view qml/Main.qml
 lgx add mymodule.lgx -v linux-amd64 -f ./new-build/libfoo.so -y
 ```
 
+#### Variant names
+
+One vocabulary, shared by `lgx`, `lgpm` and `lgpd`:
+
+| | |
+|---|---|
+| Desktop | `linux-x86_64` `linux-arm64` `darwin-x86_64` `darwin-arm64` `windows-x86_64` `windows-arm64` |
+| Mobile | `android-arm64` `android-x86_64` `ios-arm64` `ios-sim-arm64` |
+| Web container | `web` |
+
+`amd64` / `aarch64` are accepted everywhere `x86_64` / `arm64` are, and a
+non-portable consumer build looks for the `-dev` flavour of each. A host tries
+its own name first, then the other spelling of its architecture, and stops —
+`ios-sim-arm64` is not `ios-arm64`, `android-arm64` is not `linux-arm64`, and
+no native host falls back to `web`.
+
+A misspelling of one of these is refused with the name that was meant, because
+the package it would produce installs nowhere:
+
+```bash
+$ lgx add mymodule.lgx -v ios_arm64 -f ./MyModule.framework -m MyModule
+Error: Unknown variant 'ios_arm64': did you mean 'ios-arm64'?
+```
+
+See `docs/spec.md` § *Platform Variant Vocabulary* for the full table.
+
 ### Remove a Variant
 
 ```bash

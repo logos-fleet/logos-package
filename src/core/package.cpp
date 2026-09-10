@@ -1,6 +1,7 @@
 #include "package.h"
 #include "gzip_handler.h"
 #include "path_normalizer.h"
+#include "platform_variant.h"
 
 #include <fstream>
 #include <algorithm>
@@ -48,6 +49,19 @@ PngHeader readPngHeader(const std::vector<uint8_t>& data) {
     h.height = be32(20);
     h.valid  = true;
     return h;
+}
+
+// A variant name that is a MISSPELLING of one this library knows resolves on
+// no host at all, so the package is dead on arrival everywhere. Caught at
+// `lgx add` / `lgx verify` time rather than at install time on a user's
+// device. A name that resembles nothing known is left alone: private targets
+// exist and this vocabulary does not own the whole namespace.
+//
+// Returns the error to report, or empty when the name is not a near miss.
+std::string misspelledVariantError(const std::string& variant) {
+    const std::string meant = suggestVariantName(variant);
+    if (meant.empty()) return {};
+    return "Unknown variant '" + variant + "': did you mean '" + meant + "'?";
 }
 
 } // namespace
@@ -364,6 +378,14 @@ Package::VerifyResult Package::validatePackage() const {
 
     validateIconAsset(result);
 
+    for (const auto& variant : foundVariants) {
+        const std::string error = misspelledVariantError(variant);
+        if (!error.empty()) {
+            result.valid = false;
+            result.errors.push_back(error);
+        }
+    }
+
     // Validate completeness (variants <-> main mapping)
     auto completenessResult = manifest_.validateCompleteness(foundVariants);
     if (!completenessResult.valid) {
@@ -459,7 +481,11 @@ Package::Result Package::addVariant(
     if (variantLc.empty()) {
         return Result::fail("Variant name cannot be empty");
     }
-    
+
+    if (const std::string error = misspelledVariantError(variantLc); !error.empty()) {
+        return Result::fail(error);
+    }
+
     // Check if path exists
     std::error_code ec;
     if (!fs::exists(filesPath, ec)) {

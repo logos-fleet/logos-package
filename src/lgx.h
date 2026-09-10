@@ -214,6 +214,37 @@ LGX_EXPORT const char* lgx_host_variant(void);
  */
 LGX_EXPORT const char** lgx_variant_spellings(const char* variant);
 
+/**
+ * The canonical name of every target this ecosystem ships -- desktop, mobile
+ * and web -- in no particular order. These are the names a producer should
+ * write; the architecture aliases lgx_variant_spellings() yields are legacy.
+ *
+ * @return NULL-terminated array. Free with lgx_free_string_array().
+ */
+LGX_EXPORT const char** lgx_known_variants(void);
+
+/**
+ * Whether this vocabulary vouches for `variant` as written: a canonical name,
+ * one of its architecture aliases, or either carrying the "-dev" flavour
+ * suffix a non-portable build appends.
+ *
+ * False is not "invalid" -- a private target this library has never heard of
+ * is also false. Only lgx_variant_suggestion() distinguishes the two.
+ */
+LGX_EXPORT bool lgx_variant_is_known(const char* variant);
+
+/**
+ * The canonical name `variant` was probably meant to be.
+ *
+ * NULL means "nothing to say": either the name is already accepted, or it
+ * resembles nothing in the vocabulary and so belongs to someone else. A
+ * non-NULL answer is a correction for a name that will resolve on NO host.
+ *
+ * @return Thread-local storage owned by the library, valid until this thread's
+ *         next call. Do NOT free.
+ */
+LGX_EXPORT const char* lgx_variant_suggestion(const char* variant);
+
 /* Resolving a manifest's `main` against an installed directory */
 
 typedef enum {

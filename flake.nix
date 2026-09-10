@@ -53,6 +53,14 @@
           # shared semver implementation but must not link liblgx.
           headers = headersPkg;
 
+          # The header-only SemVer engine include/logos/semver.hpp is written
+          # against (nix/cpp-semver.nix -- it is not in nixpkgs). Exposed
+          # because a cross build of lgx has to stage it explicitly: the
+          # header travels with lgx's install tree, but find_package(semver)
+          # during the build needs the package itself, and a consumer
+          # cross-compiling lgx cannot reach into this flake's nix/ directory.
+          cpp-semver = common.cpp-semver;
+
           # lgx all-in-one package (binary, library, and tests)
           all = allPkg;
 

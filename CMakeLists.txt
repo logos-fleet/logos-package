@@ -41,7 +41,16 @@ if(APPLE)
     endif()
 endif()
 
-find_package(ICU REQUIRED COMPONENTS uc i18n)
+# iOS has no ICU; CoreFoundation does the same NFC normalization and
+# case mapping (see src/core/path_normalizer.cpp).
+option(LGX_UNICODE_COREFOUNDATION "Use CoreFoundation instead of ICU for Unicode normalization" OFF)
+if(LGX_UNICODE_COREFOUNDATION)
+    set(LGX_UNICODE_LIBS "-framework CoreFoundation")
+    add_compile_definitions(LGX_UNICODE_COREFOUNDATION=1)
+else()
+    find_package(ICU REQUIRED COMPONENTS uc i18n)
+    set(LGX_UNICODE_LIBS ICU::uc ICU::i18n)
+endif()
 
 # Try to find nlohmann_json first (for Nix and system installations)
 # Fall back to FetchContent if not found
@@ -107,8 +116,7 @@ target_include_directories(lgx_core PUBLIC
 
 target_link_libraries(lgx_core PUBLIC
     ZLIB::ZLIB
-    ICU::uc
-    ICU::i18n
+    ${LGX_UNICODE_LIBS}
     nlohmann_json::nlohmann_json
     semver::semver
     ${SODIUM_LIBRARIES}
@@ -116,8 +124,15 @@ target_link_libraries(lgx_core PUBLIC
 
 # Shared library (optional)
 option(LGX_BUILD_SHARED "Build shared library" OFF)
+# The same C ABI as a static archive, for hosts that cannot load a dylib.
+option(LGX_STATIC_CABI "Build the lgx C ABI (lgx.h) as a static archive named liblgx.a" OFF)
+set(LGX_CABI_LIBRARY_TYPE SHARED)
+if(LGX_STATIC_CABI)
+    set(LGX_BUILD_SHARED ON)
+    set(LGX_CABI_LIBRARY_TYPE STATIC)
+endif()
 if(LGX_BUILD_SHARED)
-    add_library(lgx_shared SHARED
+    add_library(lgx_shared ${LGX_CABI_LIBRARY_TYPE}
         src/lib.cpp
         src/core/path_normalizer.cpp
         src/core/gzip_handler.cpp
@@ -141,8 +156,7 @@ if(LGX_BUILD_SHARED)
 
     target_link_libraries(lgx_shared PUBLIC
         ZLIB::ZLIB
-        ICU::uc
-        ICU::i18n
+        ${LGX_UNICODE_LIBS}
         nlohmann_json::nlohmann_json
         semver::semver
         ${SODIUM_LIBRARIES}
@@ -165,6 +179,7 @@ if(LGX_BUILD_SHARED)
 endif()
 
 # CLI executable
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 add_executable(lgx
     src/main.cpp
     src/commands/command.cpp
@@ -199,6 +214,7 @@ if(WIN32)
 endif()
 
 install(TARGETS lgx RUNTIME DESTINATION bin)
+endif() # not iOS
 install(TARGETS lgx_core ARCHIVE DESTINATION lib)
 
 # Public headers. logos/semver.hpp is the shared semver implementation that

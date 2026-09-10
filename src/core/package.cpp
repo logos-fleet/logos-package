@@ -51,6 +51,19 @@ PngHeader readPngHeader(const std::vector<uint8_t>& data) {
     return h;
 }
 
+// A variant name that is a MISSPELLING of one this library knows resolves on
+// no host at all, so the package is dead on arrival everywhere. Caught at
+// `lgx add` / `lgx verify` time rather than at install time on a user's
+// device. A name that resembles nothing known is left alone: private targets
+// exist and this vocabulary does not own the whole namespace.
+//
+// Returns the error to report, or empty when the name is not a near miss.
+std::string misspelledVariantError(const std::string& variant) {
+    const std::string meant = suggestVariantName(variant);
+    if (meant.empty()) return {};
+    return "Unknown variant '" + variant + "': did you mean '" + meant + "'?";
+}
+
 } // namespace
 
 void Package::validateIconAsset(VerifyResult& result) const {
@@ -365,17 +378,11 @@ Package::VerifyResult Package::validatePackage() const {
 
     validateIconAsset(result);
 
-    // A variant name that is a MISSPELLING of one this library knows resolves
-    // on no host at all, so the package is dead on arrival everywhere. Caught
-    // here, at verify time, rather than at install time on a user's device.
-    // A name that resembles nothing known is left alone: private targets exist
-    // and this vocabulary does not own the whole namespace.
     for (const auto& variant : foundVariants) {
-        const std::string meant = suggestVariantName(variant);
-        if (!meant.empty()) {
+        const std::string error = misspelledVariantError(variant);
+        if (!error.empty()) {
             result.valid = false;
-            result.errors.push_back("Unknown variant '" + variant + "': did you mean '"
-                                    + meant + "'?");
+            result.errors.push_back(error);
         }
     }
 
@@ -475,11 +482,8 @@ Package::Result Package::addVariant(
         return Result::fail("Variant name cannot be empty");
     }
 
-    // Refuse a near miss on a name this library knows: the resulting package
-    // would install on no host, and the author is here right now.
-    if (const std::string meant = suggestVariantName(variantLc); !meant.empty()) {
-        return Result::fail("Unknown variant '" + variantLc + "': did you mean '"
-                            + meant + "'?");
+    if (const std::string error = misspelledVariantError(variantLc); !error.empty()) {
+        return Result::fail(error);
     }
 
     // Check if path exists

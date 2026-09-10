@@ -71,6 +71,12 @@ std::string withoutDevSuffix(const std::string& variant)
          : variant;
 }
 
+// Put back on `name` the "-dev" that withoutDevSuffix() took off `variant`.
+std::string restoreDevSuffix(const std::string& name, const std::string& variant)
+{
+    return endsWithDevSuffix(variant) ? name + kDevSuffix : name;
+}
+
 // Every name a producer SHOULD write, one per target this ecosystem ships.
 //
 // Mobile and web joined the desktop three for the store shell. Two rules the
@@ -222,6 +228,20 @@ std::string nearestAcceptedSpelling(const std::string& key)
     return bestDistance <= kMaximumDistance ? best : std::string();
 }
 
+// The canonical name a folded key points at: an accepted spelling first, then
+// a name another toolchain uses for the same target, then the nearest accepted
+// spelling by edit distance. Empty when none of the three applies.
+std::string suggestionForKey(const std::string& key)
+{
+    const auto& accepted = acceptedSpellings();
+    if (const auto it = accepted.find(key); it != accepted.end()) return it->second;
+
+    const auto& foreign = foreignSpellings();
+    if (const auto it = foreign.find(key); it != foreign.end()) return it->second;
+
+    return nearestAcceptedSpelling(key);
+}
+
 } // namespace
 
 std::string hostVariant()
@@ -330,7 +350,7 @@ std::string canonicalVariant(const std::string& variant)
     if (std::find(spellings.begin(), spellings.end(), bare) == spellings.end())
         return {};
 
-    return bare == variant ? it->second : it->second + kDevSuffix;
+    return restoreDevSuffix(it->second, variant);
 }
 
 bool isKnownVariant(const std::string& variant)
@@ -342,23 +362,9 @@ std::string suggestVariantName(const std::string& variant)
 {
     if (variant.empty() || isKnownVariant(variant)) return {};
 
-    const std::string bare = withoutDevSuffix(variant);
-    const std::string key = spellingKey(bare);
-
-    std::string suggestion;
-    const auto& accepted = acceptedSpellings();
-    const auto acceptedIt = accepted.find(key);
-    if (acceptedIt != accepted.end()) {
-        suggestion = acceptedIt->second;
-    } else {
-        const auto& foreign = foreignSpellings();
-        const auto foreignIt = foreign.find(key);
-        suggestion = foreignIt != foreign.end() ? foreignIt->second
-                                                : nearestAcceptedSpelling(key);
-    }
-
+    const std::string suggestion = suggestionForKey(spellingKey(withoutDevSuffix(variant)));
     if (suggestion.empty()) return {};
-    return bare == variant ? suggestion : suggestion + kDevSuffix;
+    return restoreDevSuffix(suggestion, variant);
 }
 
 } // namespace lgx

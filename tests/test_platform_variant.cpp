@@ -181,3 +181,182 @@ TEST(PlatformVariantTest, HostVariantIsAnOsDashArchName) {
 TEST(PlatformVariantTest, TheHostAcceptsItsOwnSpelling) {
     EXPECT_TRUE(accepts(variantSpellings(hostVariant()), hostVariant()));
 }
+
+// =============================================================================
+// Mobile and web targets
+//
+// A store shell ships three more targets than the desktop table above knows,
+// and each has to resolve on the SAME rules -- own spelling first, the other
+// live spelling of its architecture next, nothing across a target boundary.
+// The rows are a table for the same reason the desktop ones are: a Mac build
+// of this test binary never computes android-arm64 and so never meets it.
+// =============================================================================
+
+namespace {
+const VariantAliasCase kMobileAliasCases[] = {
+    { "android-arm64",    "android-aarch64"  },
+    { "android-aarch64",  "android-arm64"    },
+    { "android-x86_64",   "android-amd64"    },
+    { "android-amd64",    "android-x86_64"   },
+    { "ios-arm64",        "ios-aarch64"      },
+    { "ios-aarch64",      "ios-arm64"        },
+    { "ios-sim-arm64",    "ios-sim-aarch64"  },
+    { "ios-sim-aarch64",  "ios-sim-arm64"    },
+};
+} // namespace
+
+TEST(PlatformVariantTest, MobileTargetsAcceptBothArchSpellings) {
+    for (const auto& c : kMobileAliasCases) {
+        auto variants = variantSpellings(c.host);
+        EXPECT_EQ(variants.front(), c.host) << join(variants);
+        EXPECT_TRUE(accepts(variants, c.alsoAccepted))
+            << "host " << c.host << " does not accept producer spelling "
+            << c.alsoAccepted << "; got " << join(variants);
+    }
+}
+
+TEST(PlatformVariantTest, TheSimulatorIsNotTheDeviceAndTheDeviceIsNotDarwin) {
+    // ios-sim-arm64 and ios-arm64 are different ABIs on the same chip: a
+    // device framework does not run on the simulator, and neither is a macOS
+    // dylib. The OS half being matched verbatim is what keeps all three apart.
+    auto sim = variantSpellings("ios-sim-arm64");
+    EXPECT_FALSE(accepts(sim, "ios-arm64")) << join(sim);
+    EXPECT_FALSE(accepts(sim, "darwin-arm64")) << join(sim);
+
+    auto device = variantSpellings("ios-arm64");
+    EXPECT_FALSE(accepts(device, "ios-sim-arm64")) << join(device);
+    EXPECT_FALSE(accepts(device, "darwin-arm64")) << join(device);
+
+    auto mac = variantSpellings("darwin-arm64");
+    EXPECT_FALSE(accepts(mac, "ios-arm64")) << join(mac);
+    EXPECT_FALSE(accepts(mac, "ios-sim-arm64")) << join(mac);
+}
+
+TEST(PlatformVariantTest, AndroidIsNotLinuxEvenThoughItsKernelIs) {
+    auto android = variantSpellings("android-arm64");
+    EXPECT_FALSE(accepts(android, "linux-arm64")) << join(android);
+    EXPECT_FALSE(accepts(android, "linux-aarch64")) << join(android);
+
+    auto linux = variantSpellings("linux-arm64");
+    EXPECT_FALSE(accepts(linux, "android-arm64")) << join(linux);
+}
+
+TEST(PlatformVariantTest, WebIsArchitectureFreeAndResolvesToItselfAlone) {
+    // "web" is the one variant with no architecture half: the same bytes run
+    // wherever the Web container runs. No separator means nothing to alias.
+    EXPECT_EQ(variantSpellings("web"), std::vector<std::string>{ "web" });
+}
+
+TEST(PlatformVariantTest, NoNativeHostSilentlyAcceptsTheWebVariant) {
+    // Web payloads need the Web container, which a bare native host does not
+    // have. Selecting one here would install JS where a plugin is loaded.
+    const char* const hosts[] = { "darwin-arm64", "linux-x86_64", "windows-x86_64",
+                                  "android-arm64", "ios-arm64", "ios-sim-arm64" };
+    for (const char* h : hosts) {
+        auto variants = variantSpellings(h);
+        EXPECT_FALSE(accepts(variants, "web")) << h << " -> " << join(variants);
+    }
+}
+
+// =============================================================================
+// The canonical vocabulary
+//
+// Every variant name a producer may write is one of a closed set. A name that
+// is a MISSPELLING of one of them is a build that will never install anywhere,
+// so it is caught at `lgx add`/`lgx verify` time with the name that was meant.
+// A name that resembles nothing in the set is left alone -- private
+// vocabularies exist and this library does not own them.
+// =============================================================================
+
+TEST(PlatformVariantTest, TheVocabularyCoversEveryTargetThisMilestoneShips) {
+    const char* const expected[] = {
+        "linux-x86_64", "linux-arm64", "darwin-x86_64", "darwin-arm64",
+        "windows-x86_64", "windows-arm64",
+        "android-arm64", "android-x86_64", "ios-arm64", "ios-sim-arm64", "web",
+    };
+    const auto& known = knownVariants();
+    for (const char* e : expected) {
+        EXPECT_TRUE(std::find(known.begin(), known.end(), e) != known.end())
+            << e << " is missing from knownVariants(); got " << join(known);
+    }
+}
+
+TEST(PlatformVariantTest, EveryKnownNameIsAcceptedAsWrittenAndSuggestsNothing) {
+    for (const auto& v : knownVariants()) {
+        EXPECT_TRUE(isKnownVariant(v)) << v;
+        EXPECT_EQ(suggestVariantName(v), "") << v;
+    }
+}
+
+TEST(PlatformVariantTest, EveryArchAliasIsAcceptedAndCanonicalises) {
+    struct { const char* written; const char* canonical; } cases[] = {
+        { "linux-amd64",     "linux-x86_64"   },
+        { "darwin-aarch64",  "darwin-arm64"   },
+        { "windows-amd64",   "windows-x86_64" },
+        { "android-aarch64", "android-arm64"  },
+        { "ios-aarch64",     "ios-arm64"      },
+        { "ios-sim-aarch64", "ios-sim-arm64"  },
+    };
+    for (const auto& c : cases) {
+        EXPECT_TRUE(isKnownVariant(c.written)) << c.written;
+        EXPECT_EQ(canonicalVariant(c.written), c.canonical) << c.written;
+        EXPECT_EQ(suggestVariantName(c.written), "") << c.written;
+    }
+}
+
+TEST(PlatformVariantTest, AMisspellingIsRejectedWithTheNameThatWasMeant) {
+    struct { const char* written; const char* meant; } cases[] = {
+        { "ios_arm64",             "ios-arm64"      },
+        { "iosarm64",              "ios-arm64"      },
+        { "ios-simulator-arm64",   "ios-sim-arm64"  },
+        { "iphonesimulator-arm64", "ios-sim-arm64"  },
+        { "iphoneos-arm64",        "ios-arm64"      },
+        { "android_arm64",         "android-arm64"  },
+        { "arm64-v8a",             "android-arm64"  },
+        { "wasm",                  "web"            },
+        { "wasm32",                "web"            },
+        { "emscripten",            "web"            },
+        { "macos-arm64",           "darwin-arm64"   },
+        { "osx-arm64",             "darwin-arm64"   },
+        { "linux-x8664",           "linux-x86_64"   },
+    };
+    for (const auto& c : cases) {
+        EXPECT_FALSE(isKnownVariant(c.written)) << c.written;
+        EXPECT_EQ(suggestVariantName(c.written), c.meant) << c.written;
+    }
+}
+
+TEST(PlatformVariantTest, ANameResemblingNothingKnownIsLeftAlone) {
+    // Not every variant name in the world is ours. Only a name the vocabulary
+    // recognises as a near miss is worth correcting; the rest pass through so
+    // a private target keeps working.
+    for (const char* v : { "test", "test-variant", "variant1", "nonexistent",
+                           "linux-riscv64", "my-own-target" }) {
+        EXPECT_EQ(suggestVariantName(v), "") << v;
+    }
+}
+
+TEST(PlatformVariantTest, TheDevFlavourIsAcceptedOnEveryKnownName) {
+    // lgpm appends "-dev" for a non-portable build, so "<known>-dev" is a name
+    // real packages carry and must never be corrected away.
+    for (const auto& v : knownVariants()) {
+        const std::string dev = v + "-dev";
+        EXPECT_TRUE(isKnownVariant(dev)) << dev;
+        EXPECT_EQ(suggestVariantName(dev), "") << dev;
+    }
+}
+
+TEST(PlatformVariantTest, TheDevFlavourOfAMisspellingIsCorrectedToTheDevFlavour) {
+    EXPECT_EQ(suggestVariantName("ios_arm64-dev"), "ios-arm64-dev");
+    EXPECT_EQ(suggestVariantName("wasm-dev"), "web-dev");
+}
+
+TEST(PlatformVariantTest, AnEmptyNameIsNeitherKnownNorCorrectable) {
+    EXPECT_FALSE(isKnownVariant(""));
+    EXPECT_EQ(suggestVariantName(""), "");
+    EXPECT_EQ(canonicalVariant(""), "");
+}
+
+TEST(PlatformVariantTest, TheHostAlwaysNamesItselfInTheVocabulary) {
+    EXPECT_TRUE(isKnownVariant(hostVariant())) << hostVariant();
+}

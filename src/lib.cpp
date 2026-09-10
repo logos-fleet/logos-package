@@ -279,6 +279,25 @@ LGX_EXPORT const char** lgx_variant_spellings(const char* variant) {
     return vector_to_array(lgx::variantSpellings(variant ? variant : ""));
 }
 
+LGX_EXPORT const char** lgx_known_variants(void) {
+    clear_error();
+    return vector_to_array(lgx::knownVariants());
+}
+
+LGX_EXPORT bool lgx_variant_is_known(const char* variant) {
+    clear_error();
+    return lgx::isKnownVariant(variant ? variant : "");
+}
+
+LGX_EXPORT const char* lgx_variant_suggestion(const char* variant) {
+    clear_error();
+    /* Thread-local, so the caller never frees it and two threads asking about
+       two names never race -- the same contract as lgx_get_last_error(). */
+    static thread_local std::string suggestion;
+    suggestion = lgx::suggestVariantName(variant ? variant : "");
+    return suggestion.empty() ? nullptr : suggestion.c_str();
+}
+
 /* Resolving a manifest's `main` */
 
 namespace {

@@ -1595,3 +1595,114 @@ TEST_F(PackageTest, Icon_NonCanonicalPathRejected) {
     ASSERT_FALSE(result.errors.empty());
     EXPECT_NE(result.errors[0].find("assets/icon.png"), std::string::npos);
 }
+
+// =============================================================================
+// Variant vocabulary
+//
+// A variant name is a key inside the signed hash tree, so a misspelled one is
+// not a cosmetic problem: it produces a package that resolves on no host at
+// all, and the failure surfaces at install time on a user's device rather than
+// at build time. `lgx add` and `lgx verify` are where it is cheap to catch.
+// =============================================================================
+
+TEST_F(PackageTest, Verify_AcceptsEveryTargetOfTheStoreShell) {
+    fs::path pkgPath = tempDir / "shell.lgx";
+    Package::create(pkgPath, "shellpkg");
+
+    fs::path nativeFile = tempDir / "lib.so";
+    createTestFile(nativeFile, "native content");
+    fs::path webDir = tempDir / "dist";
+    createTestDirectory(webDir, {{"index.js", "console.log(1)"}});
+
+    auto pkg = Package::load(pkgPath);
+    for (const char* v : { "android-arm64", "android-x86_64", "ios-arm64", "ios-sim-arm64" }) {
+        auto added = pkg->addVariant(v, nativeFile);
+        EXPECT_TRUE(added.success) << v << ": " << added.error;
+    }
+    auto web = pkg->addVariant("web", webDir, std::string("index.js"));
+    EXPECT_TRUE(web.success) << web.error;
+    pkg->save(pkgPath);
+
+    auto result = Package::verify(pkgPath);
+    EXPECT_TRUE(result.valid) << (result.errors.empty() ? "" : result.errors[0]);
+    EXPECT_TRUE(result.errors.empty());
+}
+
+TEST_F(PackageTest, Add_RejectsAMisspelledVariantAndNamesTheOneMeant) {
+    fs::path pkgPath = tempDir / "typo.lgx";
+    Package::create(pkgPath, "typopkg");
+
+    fs::path file = tempDir / "lib.so";
+    createTestFile(file, "content");
+
+    auto pkg = Package::load(pkgPath);
+    auto result = pkg->addVariant("ios_arm64", file);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_NE(result.error.find("ios_arm64"), std::string::npos) << result.error;
+    EXPECT_NE(result.error.find("ios-arm64"), std::string::npos) << result.error;
+}
+
+TEST_F(PackageTest, Add_StillAcceptsANameTheVocabularyHasNoOpinionOn) {
+    // The vocabulary corrects near misses; it does not own the namespace. A
+    // name that resembles nothing in it belongs to someone else.
+    fs::path pkgPath = tempDir / "private.lgx";
+    Package::create(pkgPath, "privatepkg");
+
+    fs::path file = tempDir / "lib.so";
+    createTestFile(file, "content");
+
+    auto pkg = Package::load(pkgPath);
+    auto result = pkg->addVariant("my-own-target", file);
+    EXPECT_TRUE(result.success) << result.error;
+}
+
+TEST_F(PackageTest, Verify_RejectsAMisspelledVariantAndNamesTheOneMeant) {
+    // Built by hand: addVariant refuses the name, which is the point, so the
+    // only way a package carries one is a producer that wrote the tar itself.
+    fs::path pkgPath = tempDir / "typo.lgx";
+
+    Manifest manifest;
+    manifest.name = "typopkg";
+    manifest.version = "1.0.0";
+    manifest.setMain("ios_arm64", "lib.dylib");
+
+    DeterministicTarWriter writer;
+    writer.addFile("manifest.json", manifest.toJson());
+    writer.addDirectory("variants");
+    writer.addDirectory("variants/ios_arm64");
+    writer.addFile("variants/ios_arm64/lib.dylib", "content");
+    auto tarData = writer.finalize();
+    auto gzipData = GzipHandler::compress(tarData);
+    ASSERT_FALSE(gzipData.empty());
+    { std::ofstream out(pkgPath, std::ios::binary);
+      out.write(reinterpret_cast<const char*>(gzipData.data()),
+                static_cast<std::streamsize>(gzipData.size())); }
+
+    auto result = Package::verify(pkgPath);
+    EXPECT_FALSE(result.valid);
+    bool named = false;
+    for (const auto& e : result.errors) {
+        if (e.find("ios_arm64") != std::string::npos
+            && e.find("ios-arm64") != std::string::npos) named = true;
+    }
+    EXPECT_TRUE(named) << (result.errors.empty() ? "no errors at all" : result.errors[0]);
+}
+
+TEST_F(PackageTest, Verify_AcceptsTheDevFlavourOfEveryTarget) {
+    fs::path pkgPath = tempDir / "dev.lgx";
+    Package::create(pkgPath, "devpkg");
+
+    fs::path file = tempDir / "lib.so";
+    createTestFile(file, "content");
+
+    auto pkg = Package::load(pkgPath);
+    for (const char* v : { "darwin-arm64-dev", "linux-amd64-dev", "ios-arm64-dev", "web-dev" }) {
+        auto added = pkg->addVariant(v, file);
+        EXPECT_TRUE(added.success) << v << ": " << added.error;
+    }
+    pkg->save(pkgPath);
+
+    auto result = Package::verify(pkgPath);
+    EXPECT_TRUE(result.valid) << (result.errors.empty() ? "" : result.errors[0]);
+}

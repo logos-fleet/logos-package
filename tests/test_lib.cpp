@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "lgx.h"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <cstring>
@@ -970,6 +971,47 @@ TEST_F(VariantAbiTest, SpellingsOfNothingIsAnEmptyArrayNotNull) {
     ASSERT_NE(array, nullptr);
     EXPECT_EQ(array[0], nullptr);
     lgx_free_string_array(array);
+}
+
+TEST_F(VariantAbiTest, KnownVariantsCrossesTheAbiAndCarriesTheMobileTargets) {
+    const char** array = lgx_known_variants();
+    ASSERT_NE(array, nullptr);
+    std::vector<std::string> known;
+    for (const char** v = array; *v != nullptr; ++v) known.emplace_back(*v);
+    lgx_free_string_array(array);
+
+    for (const char* v : { "darwin-arm64", "android-arm64", "android-x86_64",
+                           "ios-arm64", "ios-sim-arm64", "web" }) {
+        EXPECT_NE(std::find(known.begin(), known.end(), v), known.end()) << v;
+    }
+}
+
+TEST_F(VariantAbiTest, ASuggestionIsNullWhenThereIsNothingToSay) {
+    // "not applicable" is NULL, never "": an accepted name and a name from
+    // someone else's vocabulary both leave the caller nothing to print.
+    EXPECT_EQ(lgx_variant_suggestion("ios-arm64"), nullptr);
+    EXPECT_EQ(lgx_variant_suggestion("my-own-target"), nullptr);
+    EXPECT_EQ(lgx_variant_suggestion(nullptr), nullptr);
+    EXPECT_EQ(lgx_variant_suggestion(""), nullptr);
+}
+
+TEST_F(VariantAbiTest, ASuggestionNamesTheTargetThatWasMeant) {
+    const char* meant = lgx_variant_suggestion("ios_arm64");
+    ASSERT_NE(meant, nullptr);
+    EXPECT_EQ(std::string(meant), "ios-arm64");
+
+    meant = lgx_variant_suggestion("wasm");
+    ASSERT_NE(meant, nullptr);
+    EXPECT_EQ(std::string(meant), "web");
+}
+
+TEST_F(VariantAbiTest, IsKnownVouchesForCanonicalNamesAliasesAndTheDevFlavour) {
+    EXPECT_TRUE(lgx_variant_is_known("ios-sim-arm64"));
+    EXPECT_TRUE(lgx_variant_is_known("android-aarch64"));
+    EXPECT_TRUE(lgx_variant_is_known("darwin-arm64-dev"));
+    EXPECT_TRUE(lgx_variant_is_known("web"));
+    EXPECT_FALSE(lgx_variant_is_known("ios_arm64"));
+    EXPECT_FALSE(lgx_variant_is_known(nullptr));
 }
 
 class MainAbiTest : public ::testing::Test {

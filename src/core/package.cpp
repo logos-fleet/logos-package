@@ -1,6 +1,7 @@
 #include "package.h"
 #include "gzip_handler.h"
 #include "path_normalizer.h"
+#include "platform_variant.h"
 
 #include <fstream>
 #include <algorithm>
@@ -364,6 +365,20 @@ Package::VerifyResult Package::validatePackage() const {
 
     validateIconAsset(result);
 
+    // A variant name that is a MISSPELLING of one this library knows resolves
+    // on no host at all, so the package is dead on arrival everywhere. Caught
+    // here, at verify time, rather than at install time on a user's device.
+    // A name that resembles nothing known is left alone: private targets exist
+    // and this vocabulary does not own the whole namespace.
+    for (const auto& variant : foundVariants) {
+        const std::string meant = suggestVariantName(variant);
+        if (!meant.empty()) {
+            result.valid = false;
+            result.errors.push_back("Unknown variant '" + variant + "': did you mean '"
+                                    + meant + "'?");
+        }
+    }
+
     // Validate completeness (variants <-> main mapping)
     auto completenessResult = manifest_.validateCompleteness(foundVariants);
     if (!completenessResult.valid) {
@@ -459,7 +474,14 @@ Package::Result Package::addVariant(
     if (variantLc.empty()) {
         return Result::fail("Variant name cannot be empty");
     }
-    
+
+    // Refuse a near miss on a name this library knows: the resulting package
+    // would install on no host, and the author is here right now.
+    if (const std::string meant = suggestVariantName(variantLc); !meant.empty()) {
+        return Result::fail("Unknown variant '" + variantLc + "': did you mean '"
+                            + meant + "'?");
+    }
+
     // Check if path exists
     std::error_code ec;
     if (!fs::exists(filesPath, ec)) {

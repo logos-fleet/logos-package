@@ -293,7 +293,7 @@ Example `ui_qml` manifest without a backend (QML-only):
 
 ### Variant Structure
 
-- Variant names are user-defined strings, stored in lowercase (case-insensitive behavior avoids Windows/macOS filesystem quirks and human typos; canonical lowercase makes matching deterministic)
+- Variant names are drawn from the platform vocabulary below, stored in lowercase (case-insensitive behavior avoids Windows/macOS filesystem quirks and human typos; canonical lowercase makes matching deterministic)
 - Variant directories contain platform-specific files
 - The directory structure within a variant is preserved from source
 
@@ -302,6 +302,55 @@ Example `ui_qml` manifest without a backend (QML-only):
 - For non-`ui_qml` packages: every variant directory must have a corresponding `main` entry
 - For `ui_qml` packages: `main` is optional. When present, the same `main`/variant correspondence applies; when absent, every variant simply ships the QML view referenced by `view`
 - This ensures installers don't have to guess entrypoints
+
+### Platform Variant Vocabulary
+
+A variant name is a key inside the signed hash tree (`hashes["variants/<name>"]`), so a
+published package can never be renamed on disk. That makes the vocabulary this library's
+to own: every consumer (`lgpm`, `lgpd`, the module builder) reads it from here rather than
+tabulating its own.
+
+**Canonical names** — one per target this ecosystem ships:
+
+| Target | Canonical variant | Also accepted (legacy) |
+|---|---|---|
+| Linux x86-64 | `linux-x86_64` | `linux-amd64` |
+| Linux arm64 | `linux-arm64` | `linux-aarch64` |
+| macOS x86-64 | `darwin-x86_64` | `darwin-amd64` |
+| macOS arm64 | `darwin-arm64` | `darwin-aarch64` |
+| Windows x86-64 | `windows-x86_64` | `windows-amd64` |
+| Windows arm64 | `windows-arm64` | `windows-aarch64` |
+| Android arm64 | `android-arm64` | `android-aarch64` |
+| Android x86-64 | `android-x86_64` | `android-amd64` |
+| iOS device | `ios-arm64` | `ios-aarch64` |
+| iOS simulator (Apple silicon) | `ios-sim-arm64` | `ios-sim-aarch64` |
+| Web container | `web` | — |
+
+`linux-x86`, `windows-x86` and `ios-sim-x86_64` are also part of the vocabulary because
+host detection can still compute them; nothing in the ecosystem builds for them today.
+
+**Fallback order.** A host looks for its own spelling first, then the other live spelling
+of its *architecture* half, and stops. The OS half is matched verbatim, which is what keeps
+a Windows package from installing as a macOS one — and, now that mobile is in the table,
+keeps `android` apart from `linux` (shared kernel, different ABI and packaging) and
+`ios-sim` apart from `ios` (same chip, different ABI: a device framework does not load on
+the simulator). So `ios-arm64` yields `[ios-arm64, ios-aarch64]` and nothing else.
+
+`web` has no architecture half — the Web container runs the same bytes everywhere — so it
+resolves to itself alone and **no native host falls back to it**. A web payload needs the
+container; a host without one would install JavaScript where it loads a plugin.
+
+A non-portable build of a consumer appends `-dev` to every name it will accept. That
+suffix is a property of the consumer's build, not of a target, so it rides on top of the
+table rather than doubling it.
+
+**Unknown spellings.** `lgx add` and `lgx verify` reject a variant name that is a
+misspelling of one in the table — an Apple SDK or Android ABI name (`iphoneos-arm64`,
+`arm64-v8a`), a toolchain name for the web target (`wasm`, `emscripten`), a separator or
+case slip (`ios_arm64`, `linux-x8664`) — and name the canonical spelling that was meant.
+Such a package resolves on no host at all, so the error belongs at build time rather than
+on a user's device. A name that resembles nothing in the table is left alone: private
+targets exist and this vocabulary does not own the whole namespace.
 
 ## Features & Requirements
 
@@ -406,7 +455,7 @@ lgx add <pkg.lgx> --variant <v> --files <path> [--main <relpath>] [--view <relpa
 1. Load existing package
 2. Verify package file exists; if not, exit with error
 3. Verify files path exists; if not, exit with error
-4. Normalize variant name to lowercase
+4. Normalize variant name to lowercase, and reject a misspelling of a known variant, naming the canonical spelling
 5. Determine effective main path:
    - If `--files` is a directory: `--main` is required except for `ui_qml` packages, where `view` is the required entry point and `main` is optional backend metadata
    - If `--files` is a single file: use basename if `--main` not provided

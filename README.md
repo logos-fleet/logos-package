@@ -427,7 +427,8 @@ If you prefer not to use Nix, you can build with CMake directly.
 - CMake 3.16+
 - C++17 compiler (GCC 8+, Clang 7+, MSVC 2019+)
 - zlib
-- ICU
+- ICU (or, on Apple platforms, `-DLGX_UNICODE_COREFOUNDATION=ON` to use
+  CoreFoundation for Unicode normalization instead; iOS has no ICU)
 
 ##### macOS (Homebrew)
 
@@ -466,6 +467,10 @@ make -j$(nproc)
 This will create:
 - `build/liblgx.dylib` (macOS) or `build/liblgx.so` (Linux) or `build/lgx.dll` (Windows)
 - The C API header is at `src/lgx.h`
+
+`-DLGX_STATIC_CABI=ON` builds the same C ABI as a static archive
+(`build/liblgx.a`) instead, for hosts that cannot load a shared library
+(iOS). The `lgx` CLI is not built when `CMAKE_SYSTEM_NAME` is `iOS`.
 
 #### Building with Tests
 

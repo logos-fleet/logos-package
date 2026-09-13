@@ -22,6 +22,29 @@
       # a cross devShell would hand you a mingw compiler with no way to run what
       # it produces.
       forAllTargets = logos-nix.lib.forAllTargets;
+
+      # The iOS targets, and the ONE build platform that can produce them
+      # (Xcode). Android is deliberately absent: lgx cross-compiles there as a
+      # SHARED object, and a consumer that embeds it in an APK has to answer for
+      # liblgx.so being in the APK too -- a question this repo cannot answer for
+      # it. iOS is static, so the consumer's image is self-contained.
+      iosBuildSystem = "aarch64-darwin";
+      iosTargets = [ "aarch64-ios" "aarch64-ios-simulator" ];
+      mobileLibs = nixpkgs.lib.genAttrs iosTargets (target:
+        let pkgs = logos-nix.lib.mkIosPkgs { inherit target; buildSystem = iosBuildSystem; }; in
+        {
+          lib = import ./nix/mobile-ios.nix {
+            inherit pkgs;
+            src = ./.;
+            # Only `version` is read out of it, and that is a string: nothing in
+            # the desktop common config is instantiated for a phone.
+            inherit (import ./nix/default.nix { inherit pkgs; }) version;
+            # The BUILD platform's header-only semver package, taken as it is --
+            # it installs headers and an INTERFACE-only CMake config, so there is
+            # nothing in it to cross-compile.
+            cppSemver = self.packages.${iosBuildSystem}.cpp-semver;
+          };
+        });
     in
     {
       packages = forAllTargets ({ pkgs, ... }:
@@ -68,6 +91,14 @@
           default = allPkg;
         }
       );
+
+      # `legacyPackages`, not `packages`: a cross derivation's `system` is its
+      # BUILD platform, so these would collide with the native aarch64-darwin
+      # set, and `nix flake check` would try to realise an iOS archive as if it
+      # were a Mac one. The shape is the one logos-module-builder's
+      # `mobilePackages` seam reads: mobile.<target>.lib, laid out lib/ +
+      # include/ exactly like packages.<system>.lib.
+      legacyPackages.${iosBuildSystem}.mobile = mobileLibs;
 
       checks = forAllSystems ({ pkgs }:
         let

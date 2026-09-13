@@ -55,9 +55,12 @@ pkgs.mkIosCmakeStage {
     cp ../src/lgx.h $out/include/
     cp -r ${cppSemver}/include/semver $out/include/
 
-    "$(xcrun --find libtool)" -static -no_warning_for_no_symbols       -o liblgx-merged.a "$out/lib/liblgx.a" "${pkgs.libsodium}/lib/libsodium.a"
-    mv liblgx-merged.a "$out/lib/liblgx.a"
-    "$(xcrun --find libtool)" -static -no_warning_for_no_symbols       -o liblgx_core-merged.a "$out/lib/liblgx_core.a" "${pkgs.libsodium}/lib/libsodium.a"
-    mv liblgx_core-merged.a "$out/lib/liblgx_core.a"
+    # Both archives this package installs, each folded with libsodium in turn.
+    for _archive in liblgx liblgx_core; do
+      "$(xcrun --find libtool)" -static -no_warning_for_no_symbols \
+        -o "$_archive-merged.a" \
+        "$out/lib/$_archive.a" "${pkgs.libsodium}/lib/libsodium.a"
+      mv "$_archive-merged.a" "$out/lib/$_archive.a"
+    done
   '';
 }

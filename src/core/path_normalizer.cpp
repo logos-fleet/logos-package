@@ -2,6 +2,9 @@
 
 #if defined(LGX_UNICODE_COREFOUNDATION)
 #include <CoreFoundation/CoreFoundation.h>
+#elif defined(LGX_UNICODE_UTF8PROC)
+#include <utf8proc.h>
+#include <cstdlib>
 #else
 #include <unicode/normalizer2.h>
 #include <unicode/unistr.h>
@@ -52,6 +55,62 @@ bool PathNormalizer::isNFC(const std::string& str) {
 std::string PathNormalizer::toLowercase(const std::string& str) {
     return cfTransform(str, lower).value_or(str);
 }
+#elif defined(LGX_UNICODE_UTF8PROC)
+namespace {
+// utf8proc_map / utf8proc_map_custom own their output buffer; both hand it back
+// malloc'd and expect the caller to free it.
+//
+// `custom` is the per-codepoint mapping applied BEFORE composition, or nullptr
+// for none. Both callers below pass the same option set: STABLE (never emit
+// unassigned codepoints) + COMPOSE (produce NFC), which is utf8proc's spelling
+// of what ICU's Normalizer2::getNFCInstance does.
+std::optional<std::string> mapUtf8(const std::string& in,
+                                   utf8proc_custom_func custom) {
+    // utf8proc reports a zero-length input as a zero-length result, but the
+    // buffer it allocates for it is not worth reasoning about: an empty string
+    // is already NFC and already lowercase.
+    if (in.empty()) return std::string();
+
+    utf8proc_uint8_t* out = nullptr;
+    const auto options =
+        static_cast<utf8proc_option_t>(UTF8PROC_STABLE | UTF8PROC_COMPOSE);
+    const utf8proc_ssize_t n = utf8proc_map_custom(
+        reinterpret_cast<const utf8proc_uint8_t*>(in.data()),
+        static_cast<utf8proc_ssize_t>(in.size()), &out, options, custom, nullptr);
+    // A negative result is an error code, and the one that matters here is
+    // UTF8PROC_ERROR_INVALIDUTF8: ICU's fromUTF8 would have replaced bad bytes
+    // with U+FFFD and normalized THAT, which is a different answer to a
+    // question the caller did not ask. nullopt says "this is not text".
+    if (n < 0 || out == nullptr) {
+        free(out);
+        return std::nullopt;
+    }
+    std::string result(reinterpret_cast<char*>(out), static_cast<size_t>(n));
+    free(out);
+    return result;
+}
+
+utf8proc_int32_t toLowerCodepoint(utf8proc_int32_t c, void*) {
+    return utf8proc_tolower(c);
+}
+} // namespace
+
+std::optional<std::string> PathNormalizer::toNFC(const std::string& path) {
+    return mapUtf8(path, nullptr);
+}
+
+bool PathNormalizer::isNFC(const std::string& str) {
+    auto n = mapUtf8(str, nullptr);
+    return n && *n == str;
+}
+
+std::string PathNormalizer::toLowercase(const std::string& str) {
+    // Simple lowercase, not case folding: utf8proc offers UTF8PROC_CASEFOLD as
+    // an option, and it is a DIFFERENT mapping (German sharp s folds to "ss").
+    // The ICU path calls UnicodeString::toLower, and these names are compared
+    // against each other across platforms, so the two must agree.
+    return mapUtf8(str, toLowerCodepoint).value_or(str);
+}
 #else
 
 std::optional<std::string> PathNormalizer::toNFC(const std::string& path) {
@@ -101,7 +160,7 @@ std::string PathNormalizer::toLowercase(const std::string& str) {
     ustr.toUTF8String(result);
     return result;
 }
-#endif // LGX_UNICODE_COREFOUNDATION
+#endif // LGX_UNICODE_COREFOUNDATION / LGX_UNICODE_UTF8PROC
 
 PathNormalizer::ValidationResult PathNormalizer::validateArchivePath(const std::string& archivePath) {
     // Check for empty path

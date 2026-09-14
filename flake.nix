@@ -23,28 +23,45 @@
       # it produces.
       forAllTargets = logos-nix.lib.forAllTargets;
 
-      # The iOS targets, and the ONE build platform that can produce them
-      # (Xcode). Android is deliberately absent: lgx cross-compiles there as a
-      # SHARED object, and a consumer that embeds it in an APK has to answer for
-      # liblgx.so being in the APK too -- a question this repo cannot answer for
-      # it. iOS is static, so the consumer's image is self-contained.
+      # The three mobile targets, each keyed by the ONE build platform this
+      # flake publishes it under. iOS needs Xcode, so aarch64-darwin is not a
+      # choice; Android builds from either member of logos-nix's
+      # androidBuildSystems, and a cross derivation's `system` is its BUILD
+      # platform -- so it is published under every one of them rather than
+      # under a target key nothing can realise.
+      #
+      # ALL THREE ARE STATIC ARCHIVES, for two different reasons that meet in
+      # the same place: iOS loads no dynamic library of its own, and an Android
+      # APK may not carry an unbundled liblgx.so past logos-nix's DT_NEEDED
+      # gate. See nix/mobile-ios.nix and nix/mobile-android.nix.
       iosBuildSystem = "aarch64-darwin";
       iosTargets = [ "aarch64-ios" "aarch64-ios-simulator" ];
+      # `version` is the only thing read out of the desktop common config, and
+      # it is a string: nothing in it is instantiated for a phone. `cppSemver`
+      # is the BUILD platform's header-only semver package, taken as it is --
+      # it installs headers and an INTERFACE-only CMake config, so there is
+      # nothing in it to cross-compile.
+      mobileLib = { buildSystem, file, pkgs }: {
+        lib = import file {
+          inherit pkgs;
+          src = ./.;
+          inherit (import ./nix/default.nix { inherit pkgs; }) version;
+          cppSemver = self.packages.${buildSystem}.cpp-semver;
+        };
+      };
       mobileLibs = nixpkgs.lib.genAttrs iosTargets (target:
-        let pkgs = logos-nix.lib.mkIosPkgs { inherit target; buildSystem = iosBuildSystem; }; in
-        {
-          lib = import ./nix/mobile-ios.nix {
-            inherit pkgs;
-            src = ./.;
-            # Only `version` is read out of it, and that is a string: nothing in
-            # the desktop common config is instantiated for a phone.
-            inherit (import ./nix/default.nix { inherit pkgs; }) version;
-            # The BUILD platform's header-only semver package, taken as it is --
-            # it installs headers and an INTERFACE-only CMake config, so there is
-            # nothing in it to cross-compile.
-            cppSemver = self.packages.${iosBuildSystem}.cpp-semver;
-          };
+        mobileLib {
+          buildSystem = iosBuildSystem;
+          file = ./nix/mobile-ios.nix;
+          pkgs = logos-nix.lib.mkIosPkgs { inherit target; buildSystem = iosBuildSystem; };
         });
+      androidLibs = buildSystem: {
+        aarch64-android = mobileLib {
+          inherit buildSystem;
+          file = ./nix/mobile-android.nix;
+          pkgs = logos-nix.lib.mkAndroidPkgs { inherit buildSystem; };
+        };
+      };
     in
     {
       packages = forAllTargets ({ pkgs, ... }:
@@ -98,7 +115,15 @@
       # were a Mac one. The shape is the one logos-module-builder's
       # `mobilePackages` seam reads: mobile.<target>.lib, laid out lib/ +
       # include/ exactly like packages.<system>.lib.
-      legacyPackages.${iosBuildSystem}.mobile = mobileLibs;
+      legacyPackages =
+        nixpkgs.lib.genAttrs logos-nix.lib.androidBuildSystems
+          (buildSystem: { mobile = androidLibs buildSystem; })
+        // {
+          # Merged rather than assigned: aarch64-darwin builds both Android and
+          # iOS, and writing it twice would drop one of the two.
+          ${iosBuildSystem}.mobile =
+            mobileLibs // (androidLibs iosBuildSystem);
+        };
 
       checks = forAllSystems ({ pkgs }:
         let
@@ -106,6 +131,9 @@
           src = ./.;
         in {
           tests = import ./nix/all.nix { inherit pkgs common src; };
+          # The Android Unicode backend, run where a test binary can execute.
+          utf8proc-backend-tests =
+            import ./nix/unicode-backend-test.nix { inherit pkgs common src; };
         }
       );
 

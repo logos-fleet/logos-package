@@ -427,8 +427,16 @@ If you prefer not to use Nix, you can build with CMake directly.
 - CMake 3.16+
 - C++17 compiler (GCC 8+, Clang 7+, MSVC 2019+)
 - zlib
-- ICU (or, on Apple platforms, `-DLGX_UNICODE_COREFOUNDATION=ON` to use
-  CoreFoundation for Unicode normalization instead; iOS has no ICU)
+- ICU, or one of the two replacements for platforms that have none. Exactly
+  one of these may be on, and each provides the same two operations (NFC
+  normalization and lowercase mapping) that `src/core/path_normalizer.cpp`
+  needs:
+  - `-DLGX_UNICODE_COREFOUNDATION=ON` — CoreFoundation, on Apple platforms
+    (iOS has no ICU).
+  - `-DLGX_UNICODE_UTF8PROC=ON` — [utf8proc](https://juliastrings.github.io/utf8proc/),
+    on Android (the NDK ships no ICU headers, and the platform's own
+    `libicu.so` only exists from API 31). It is also the cheap one to link
+    statically: ICU's tables are ~30 MB, utf8proc's ~350 KB.
 
 ##### macOS (Homebrew)
 
@@ -469,8 +477,11 @@ This will create:
 - The C API header is at `src/lgx.h`
 
 `-DLGX_STATIC_CABI=ON` builds the same C ABI as a static archive
-(`build/liblgx.a`) instead, for hosts that cannot load a shared library
-(iOS). The `lgx` CLI is not built when `CMAKE_SYSTEM_NAME` is `iOS`.
+(`build/liblgx.a`) instead, for hosts that cannot load a shared library (iOS),
+and for hosts that could but must not — an Android APK may only carry sonames
+the app itself packages, so a module linking lgx folds the archive in instead
+(see `nix/mobile-android.nix`). The `lgx` CLI is not built when
+`CMAKE_SYSTEM_NAME` is `iOS`.
 
 #### Building with Tests
 

@@ -41,12 +41,39 @@ if(APPLE)
     endif()
 endif()
 
-# iOS has no ICU; CoreFoundation does the same NFC normalization and
-# case mapping (see src/core/path_normalizer.cpp).
+# THE UNICODE BACKEND. PathNormalizer needs exactly two Unicode operations --
+# NFC normalization and lowercase mapping -- and which library provides them is
+# a property of the PLATFORM, not a preference (see src/core/path_normalizer.cpp
+# for the three implementations).
+#
+#   ICU              the default, and what every desktop has.
+#   CoreFoundation   iOS: no ICU on that SDK, and CFStringNormalize does the
+#                    same NFC.
+#   utf8proc         Android: no ICU headers in the NDK, and the platform's own
+#                    libicu.so only appears at API 31 while this stack targets
+#                    28. A static libicuuc+libicudata would also be ~30 MB of
+#                    archive folded into a module that is otherwise ~1 MB;
+#                    utf8proc's tables are ~350 KB.
 option(LGX_UNICODE_COREFOUNDATION "Use CoreFoundation instead of ICU for Unicode normalization" OFF)
+option(LGX_UNICODE_UTF8PROC "Use utf8proc instead of ICU for Unicode normalization" OFF)
+if(LGX_UNICODE_COREFOUNDATION AND LGX_UNICODE_UTF8PROC)
+    message(FATAL_ERROR "LGX_UNICODE_COREFOUNDATION and LGX_UNICODE_UTF8PROC are mutually exclusive")
+endif()
 if(LGX_UNICODE_COREFOUNDATION)
     set(LGX_UNICODE_LIBS "-framework CoreFoundation")
     add_compile_definitions(LGX_UNICODE_COREFOUNDATION=1)
+elseif(LGX_UNICODE_UTF8PROC)
+    # find_library/find_path rather than find_package: utf8proc ships a CMake
+    # config only when it was built with CMake, and the Android cross build
+    # takes it from a package set where that is not guaranteed. NO_DEFAULT_PATH
+    # is deliberately NOT used -- under cross, CMAKE_FIND_ROOT_PATH is what
+    # scopes the search to the target's prefixes.
+    find_path(UTF8PROC_INCLUDE_DIR NAMES utf8proc.h REQUIRED)
+    find_library(UTF8PROC_LIBRARY NAMES utf8proc REQUIRED)
+    message(STATUS "Using utf8proc for Unicode: ${UTF8PROC_LIBRARY}")
+    set(LGX_UNICODE_LIBS ${UTF8PROC_LIBRARY})
+    include_directories(${UTF8PROC_INCLUDE_DIR})
+    add_compile_definitions(LGX_UNICODE_UTF8PROC=1)
 else()
     find_package(ICU REQUIRED COMPONENTS uc i18n)
     set(LGX_UNICODE_LIBS ICU::uc ICU::i18n)

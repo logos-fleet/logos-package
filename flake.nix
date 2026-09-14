@@ -55,6 +55,16 @@
           file = ./nix/mobile-ios.nix;
           pkgs = logos-nix.lib.mkIosPkgs { inherit target; buildSystem = iosBuildSystem; };
         });
+      # The build platforms that can produce the Android archive. logos-nix owns
+      # this list, and the workspace's `follows` supplies a pin that publishes it
+      # -- but the ATTRIBUTE NAMES of `legacyPackages` have to be computable from
+      # THIS repo's own lock as well (`ws test` evaluates the sub-repo flake with
+      # no overrides at all), and that pin predates `lib.androidBuildSystems`. So
+      # the list is read when it is there and spelled out when it is not; the
+      # derivations under those names still come from logos-nix and still fail
+      # loudly on a pin too old to build them, exactly as the iOS ones do.
+      androidBuildSystems =
+        logos-nix.lib.androidBuildSystems or [ "x86_64-linux" "aarch64-darwin" ];
       androidLibs = buildSystem: {
         aarch64-android = mobileLib {
           inherit buildSystem;
@@ -116,7 +126,7 @@
       # `mobilePackages` seam reads: mobile.<target>.lib, laid out lib/ +
       # include/ exactly like packages.<system>.lib.
       legacyPackages =
-        nixpkgs.lib.genAttrs logos-nix.lib.androidBuildSystems
+        nixpkgs.lib.genAttrs androidBuildSystems
           (buildSystem: { mobile = androidLibs buildSystem; })
         // {
           # Merged rather than assigned: aarch64-darwin builds both Android and
